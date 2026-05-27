@@ -1,0 +1,15 @@
+{
+  "name": "gmiseedance2newapi",
+  "version": "1.0.0",
+  "description": "GMI Cloud Seedance 2.0 bridge for new-api VolcEngine/Doubao video task channels",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/*.js test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

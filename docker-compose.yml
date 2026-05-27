@@ -1,0 +1,29 @@
+services:
+  gmiseedance2newapi:
+    build: .
+    container_name: gmiseedance2newapi
+    restart: unless-stopped
+    environment:
+      PORT: ${PORT:-3001}
+      GMI_API_BASE_URL: ${GMI_API_BASE_URL:-https://console.gmicloud.ai}
+      GMI_API_KEY: ${GMI_API_KEY:-}
+      GMI_ORG_ID: ${GMI_ORG_ID:-}
+      DATA_DIR: /data
+      UPSTREAM_TIMEOUT_MS: ${UPSTREAM_TIMEOUT_MS:-60000}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-seedance-2-0-260128}
+      SECOND_IMAGE_AS_LAST_FRAME: ${SECOND_IMAGE_AS_LAST_FRAME:-true}
+      ENABLE_CORS: ${ENABLE_CORS:-true}
+      MODEL_MAP_JSON: ${MODEL_MAP_JSON:-}
+      BILLING_USAGE_MODE: ${BILLING_USAGE_MODE:-duration}
+      BILLING_DEFAULT_DURATION: ${BILLING_DEFAULT_DURATION:-5}
+      BILLING_RESOLUTION_MULTIPLIERS_JSON: ${BILLING_RESOLUTION_MULTIPLIERS_JSON:-}
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "const p=process.env.PORT||3001; fetch(`http://127.0.0.1:${p}/healthz`).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
