@@ -123,15 +123,18 @@ This bridge converts GMI Cloud's per-second video prices into synthetic token us
 BILLING_USAGE_MODE=duration
 BILLING_DEFAULT_DURATION=5
 BILLING_RESOLUTION_MULTIPLIERS_JSON={"480p":24000,"720p":52000,"1080p":116000}
+BILLING_MODEL_MULTIPLIERS_JSON={"seedance-2-0-fast-260128":22000}
 ```
 
-The mapping is:
+For Seedance 2.0, the resolution mapping is:
 
 ```text
 480p:  24,000 tokens/second  -> $0.024/second at $1/M tokens
 720p:  52,000 tokens/second  -> $0.052/second at $1/M tokens
 1080p: 116,000 tokens/second -> $0.116/second at $1/M tokens
 ```
+
+For Seedance 2.0 Fast, the model mapping overrides resolution and uses 22,000 tokens/second, which maps to $0.022/second at $1/M tokens.
 
 On the new-api side, do not configure these models with `ModelPrice`; configure token pricing instead. In the combined pricing UI, set input price to `1` for each bridge-facing model. If editing raw `ModelRatio`, use `0.5`, because new-api stores `ModelRatio = input price / 2`.
 
@@ -145,6 +148,7 @@ Environment controls:
 BILLING_USAGE_MODE=duration
 BILLING_DEFAULT_DURATION=5
 BILLING_RESOLUTION_MULTIPLIERS_JSON={"480p":24000,"720p":52000,"1080p":116000}
+BILLING_MODEL_MULTIPLIERS_JSON={"seedance-2-0-fast-260128":22000}
 ```
 
 Set `BILLING_USAGE_MODE=zero` to disable usage backfill.
@@ -164,6 +168,7 @@ Set `BILLING_USAGE_MODE=zero` to disable usage backfill.
 | `MODEL_MAP_JSON` | empty | JSON object for model alias overrides |
 | `BILLING_USAGE_MODE` | `duration` | `duration` reports generated seconds as usage tokens; `zero` disables this |
 | `BILLING_DEFAULT_DURATION` | `5` | Duration used for billing when upstream omits duration |
+| `BILLING_MODEL_MULTIPLIERS_JSON` | empty | Optional JSON object for model-specific effective-second multipliers; these override resolution multipliers |
 | `BILLING_RESOLUTION_MULTIPLIERS_JSON` | empty | Optional JSON object for effective-second multipliers by resolution |
 
 ## Health Check

@@ -519,8 +519,18 @@ function billingUnits(gmi, record, config) {
     duration = config.billingDefaultDuration || 5;
   }
 
+  const modelCandidates = [
+    gmi?.model,
+    record?.upstreamModel,
+    record?.downstreamModel ? normalizeModel(record.downstreamModel, config) : undefined,
+    record?.downstreamModel
+  ].filter(Boolean);
+  const modelMultiplier = modelCandidates
+    .map((model) => Number(config.billingModelMultipliers?.[model]))
+    .find((value) => Number.isFinite(value) && value >= 0);
+
   const resolution = payloadValue(gmi, record, 'resolution');
-  const multiplier = Number(config.billingResolutionMultipliers?.[resolution] ?? 1);
+  const multiplier = modelMultiplier ?? Number(config.billingResolutionMultipliers?.[resolution] ?? 1);
   const units = duration * (Number.isFinite(multiplier) && multiplier >= 0 ? multiplier : 1);
   return Math.max(0, Math.ceil(units));
 }

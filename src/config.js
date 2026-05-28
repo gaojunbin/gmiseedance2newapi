@@ -111,6 +111,7 @@ export function loadConfig({ cwd = process.cwd() } = {}) {
     validationMode: process.env.VALIDATION_MODE || 'strict',
     billingUsageMode: process.env.BILLING_USAGE_MODE || 'duration',
     billingDefaultDuration: parseInteger('BILLING_DEFAULT_DURATION', 5),
+    billingModelMultipliers: parseNumberMap('BILLING_MODEL_MULTIPLIERS_JSON'),
     billingResolutionMultipliers: parseNumberMap('BILLING_RESOLUTION_MULTIPLIERS_JSON')
   };
 }

@@ -332,6 +332,51 @@ test('VolcEngine usage backfill supports resolution multipliers for billing', as
   }
 });
 
+test('VolcEngine usage backfill lets model multipliers override resolution billing', async () => {
+  const upstream = await startServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/api/v1/ie/requestqueue/apikey/requests/gmi-task-fast') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        request_id: 'gmi-task-fast',
+        model: 'seedance-2-0-fast-260128',
+        status: 'success',
+        payload: {
+          prompt: 'A fast 1080p scene',
+          duration: 6,
+          resolution: '1080p'
+        },
+        outcome: {
+          video_url: 'https://cdn.example/fast.mp4'
+        },
+        created_at: 340,
+        updated_at: 360
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  const { bridge } = await buildBridge(upstream.url, {
+    billingModelMultipliers: {
+      'seedance-2-0-fast-260128': 22000
+    },
+    billingResolutionMultipliers: {
+      '1080p': 116000
+    }
+  });
+  try {
+    const fetched = await requestJson(bridge.url, '/api/v3/contents/generations/tasks/gmi-task-fast');
+    assert.equal(fetched.status, 200);
+    assert.equal(fetched.json.status, 'succeeded');
+    assert.equal(fetched.json.usage.completion_tokens, 132000);
+    assert.equal(fetched.json.usage.total_tokens, 132000);
+  } finally {
+    await bridge.close();
+    await upstream.close();
+  }
+});
+
 test('fallback GMI_API_KEY is used when new-api does not send Authorization', async () => {
   let forwardedAuth = '';
   const upstream = await startServer(async (req, res) => {
