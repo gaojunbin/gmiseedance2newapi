@@ -55,7 +55,7 @@ Create or edit the existing Seedance channel in new-api:
 Type: DoubaoVideo or VolcEngine video channel already used for Seedance
 Base URL: http://YOUR_BRIDGE_HOST:3001
 Key: YOUR_GMI_CLOUD_API_KEY
-Models: doubao-seedance-2-0-260128,doubao-seedance-2-0-fast-260128
+Models: gmi-seedance-2-0-260128,gmi-seedance-2-0-fast-260128
 ```
 
 Your business request can remain the same as before. new-api will call:
@@ -86,7 +86,7 @@ seedance-2-0-fast-260128        -> seedance-2-0-fast-260128
 Override or add aliases with `MODEL_MAP_JSON`:
 
 ```env
-MODEL_MAP_JSON={"my-seedance":"seedance-2-0-260128"}
+MODEL_MAP_JSON={"gmi-seedance-2-0-260128":"seedance-2-0-260128","gmi-seedance-2-0-fast-260128":"seedance-2-0-fast-260128"}
 ```
 
 ## Parameter Mapping
@@ -117,21 +117,34 @@ If `content[].role` is `first_frame`, `last_frame`, or `reference_image`, that r
 
 new-api's current DoubaoVideo task adapter reads `usage.total_tokens` from completed task responses when the model is billed by `ModelRatio` rather than fixed `ModelPrice`.
 
-By default this bridge returns:
-
-```text
-usage.total_tokens = generated duration in seconds
-usage.completion_tokens = generated duration in seconds
-```
-
-That lets you configure the model ratio in new-api as a per-second quota unit without changing new-api code. If you prefer fixed-price billing in new-api, configure `ModelPrice` there; new-api will treat the task as fixed-price and ignore later token recalculation.
-
-Optional environment controls:
+This bridge converts GMI Cloud's per-second video prices into synthetic token usage. With new-api's input price set to `$1/M tokens`, configure:
 
 ```env
 BILLING_USAGE_MODE=duration
 BILLING_DEFAULT_DURATION=5
-BILLING_RESOLUTION_MULTIPLIERS_JSON={"480p":1,"720p":1,"1080p":1}
+BILLING_RESOLUTION_MULTIPLIERS_JSON={"480p":24000,"720p":52000,"1080p":116000}
+```
+
+The mapping is:
+
+```text
+480p:  24,000 tokens/second  -> $0.024/second at $1/M tokens
+720p:  52,000 tokens/second  -> $0.052/second at $1/M tokens
+1080p: 116,000 tokens/second -> $0.116/second at $1/M tokens
+```
+
+On the new-api side, do not configure these models with `ModelPrice`; configure token pricing instead. In the combined pricing UI, set input price to `1` for each bridge-facing model. If editing raw `ModelRatio`, use `0.5`, because new-api stores `ModelRatio = input price / 2`.
+
+Do not add these models to `TASK_PRICE_PATCH`. `ModelPrice` and `TASK_PRICE_PATCH` both make new-api treat the task as fixed-price billing and skip the completion-time recalculation from `usage.total_tokens`.
+
+Avoid using `doubao-seedance-2-0-*` as the model name exposed to new-api for this bridge. new-api's Doubao task adapter applies a built-in `video_input` multiplier to those model names when the request contains `video_url`, which can undercharge GMI Cloud video-reference requests. Use aliases such as `gmi-seedance-2-0-260128` and map them to the real GMI model IDs with `MODEL_MAP_JSON`, or use plain `seedance-2-0-*` names if your new-api model configuration allows them.
+
+Environment controls:
+
+```env
+BILLING_USAGE_MODE=duration
+BILLING_DEFAULT_DURATION=5
+BILLING_RESOLUTION_MULTIPLIERS_JSON={"480p":24000,"720p":52000,"1080p":116000}
 ```
 
 Set `BILLING_USAGE_MODE=zero` to disable usage backfill.
