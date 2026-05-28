@@ -103,6 +103,7 @@ watermark                     -> watermark
 generate_audio                -> generate_audio
 tools[type=web_search]        -> web_search
 content[].image_url / image   -> first_frame, last_frame, reference_images
+content[].image_url role      -> first_frame / last_frame / reference_images
 content[].video_url           -> reference_videos
 content[].audio_url           -> reference_audios
 reference_asset_ids           -> reference_asset_ids
@@ -110,7 +111,7 @@ reference_asset_ids           -> reference_asset_ids
 
 Explicit `0` and `false` values are preserved.
 
-By default, the first image becomes `first_frame`; the second image becomes `last_frame`; remaining images become `reference_images`. Set `SECOND_IMAGE_AS_LAST_FRAME=false` if you want every image after the first to become a reference image.
+If `content[].role` is `first_frame`, `last_frame`, or `reference_image`, that role is respected. This matches the request shape produced by Chatall through new-api for Seedance first-frame and reference-image modes. For legacy role-less requests, the first image becomes `first_frame`; the second image becomes `last_frame`; remaining images become `reference_images`. Set `SECOND_IMAGE_AS_LAST_FRAME=false` if you want every role-less image after the first to become a reference image.
 
 ## Billing Compatibility
 

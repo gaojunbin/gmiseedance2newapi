@@ -25,6 +25,14 @@ function toInteger(value, fieldName) {
   return parsed;
 }
 
+function toNonNegativeInteger(value, fieldName) {
+  const parsed = toInteger(value, fieldName);
+  if (parsed !== undefined && parsed < 0) {
+    throw new HttpError(400, `${fieldName} must be a non-negative integer`);
+  }
+  return parsed;
+}
+
 function toBoolean(value, fieldName) {
   if (value === undefined || value === null || value === '') return undefined;
   if (typeof value === 'boolean') return value;
@@ -50,17 +58,51 @@ function asStringArray(value) {
   return value.map(mediaUrl).filter(Boolean);
 }
 
-function pushIfPresent(target, value) {
-  const url = mediaUrl(value);
-  if (url) target.push(url);
+function normalizeRole(role) {
+  const normalized = String(role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  switch (normalized) {
+    case 'firstframe':
+    case 'first_frame':
+    case 'first_frame_image':
+    case 'start_frame':
+    case 'start_image':
+      return 'first_frame';
+    case 'lastframe':
+    case 'last_frame':
+    case 'last_frame_image':
+    case 'tail_frame':
+    case 'end_frame':
+    case 'end_image':
+      return 'last_frame';
+    case 'reference':
+    case 'reference_image':
+    case 'reference_images':
+    case 'ref_image':
+      return 'reference_image';
+    case 'reference_video':
+    case 'reference_videos':
+    case 'ref_video':
+      return 'reference_video';
+    case 'reference_audio':
+    case 'reference_audios':
+    case 'ref_audio':
+      return 'reference_audio';
+    default:
+      return '';
+  }
 }
 
 function extractContent(content) {
   const result = {
     texts: [],
     images: [],
+    firstFrames: [],
+    lastFrames: [],
+    referenceImages: [],
     videos: [],
-    audios: []
+    referenceVideos: [],
+    audios: [],
+    referenceAudios: []
   };
   if (!Array.isArray(content)) return result;
 
@@ -69,9 +111,35 @@ function extractContent(content) {
     if (typeof item.text === 'string' && item.text.trim()) {
       result.texts.push(item.text.trim());
     }
-    pushIfPresent(result.images, item.image_url);
-    pushIfPresent(result.videos, item.video_url);
-    pushIfPresent(result.audios, item.audio_url);
+
+    const role = normalizeRole(item.role);
+    const imageUrl = mediaUrl(item.image_url);
+    if (imageUrl) {
+      if (role === 'first_frame') result.firstFrames.push(imageUrl);
+      else if (role === 'last_frame') result.lastFrames.push(imageUrl);
+      else if (role === 'reference_image') result.referenceImages.push(imageUrl);
+      else result.images.push(imageUrl);
+    }
+
+    const videoUrl = mediaUrl(item.video_url);
+    if (videoUrl) {
+      if (role === 'reference_video') result.referenceVideos.push(videoUrl);
+      else result.videos.push(videoUrl);
+    }
+
+    const audioUrl = mediaUrl(item.audio_url);
+    if (audioUrl) {
+      if (role === 'reference_audio') result.referenceAudios.push(audioUrl);
+      else result.audios.push(audioUrl);
+    }
+  }
+  return result;
+}
+
+function mergeContentArrays(...values) {
+  const result = [];
+  for (const value of values) {
+    if (Array.isArray(value)) result.push(...value);
   }
   return result;
 }
@@ -192,13 +260,30 @@ function applyCommonPayloadFields(payload, raw) {
     throw new HttpError(400, 'seed must be between 0 and 4294967295');
   }
 
+  const frames = toNonNegativeInteger(firstDefined(raw, ['frames']), 'frames');
+  const framesPerSecond = toNonNegativeInteger(
+    firstDefined(raw, ['framespersecond', 'framesPerSecond', 'frames_per_second', 'fps']),
+    'framespersecond'
+  );
+  const executionExpiresAfter = toNonNegativeInteger(
+    firstDefined(raw, ['execution_expires_after', 'executionExpiresAfter']),
+    'execution_expires_after'
+  );
+
   setIfDefined(payload, 'duration', duration);
   setIfDefined(payload, 'resolution', normalizeResolution(firstDefined(raw, ['resolution']), size));
   setIfDefined(payload, 'ratio', normalizeRatio(firstDefined(raw, ['ratio', 'aspectRatio', 'aspect_ratio']), size));
   setIfDefined(payload, 'seed', seed);
+  setIfDefined(payload, 'frames', frames);
+  setIfDefined(payload, 'framespersecond', framesPerSecond);
+  setIfDefined(payload, 'service_tier', firstDefined(raw, ['service_tier', 'serviceTier']));
+  setIfDefined(payload, 'execution_expires_after', executionExpiresAfter);
   setIfDefined(payload, 'watermark', toBoolean(firstDefined(raw, ['watermark']), 'watermark'));
   setIfDefined(payload, 'generate_audio', toBoolean(firstDefined(raw, ['generate_audio', 'generateAudio']), 'generate_audio'));
   setIfDefined(payload, 'web_search', toBoolean(firstDefined(raw, ['web_search', 'webSearch']), 'web_search'));
+  setIfDefined(payload, 'return_last_frame', toBoolean(firstDefined(raw, ['return_last_frame', 'returnLastFrame']), 'return_last_frame'));
+  setIfDefined(payload, 'draft', toBoolean(firstDefined(raw, ['draft']), 'draft'));
+  setIfDefined(payload, 'camera_fixed', toBoolean(firstDefined(raw, ['camera_fixed', 'cameraFixed']), 'camera_fixed'));
 }
 
 function applyReferenceFields(payload, raw, content, config) {
@@ -206,11 +291,13 @@ function applyReferenceFields(payload, raw, content, config) {
     ...asStringArray(firstDefined(raw, ['images'])),
     ...content.images
   ];
+  const firstFrames = [...content.firstFrames];
+  const lastFrames = [...content.lastFrames];
 
   const explicitFirst = firstDefined(raw, ['first_frame', 'firstFrame', 'first_frame_image', 'image']);
   const explicitLast = firstDefined(raw, ['last_frame', 'lastFrame', 'last_frame_image', 'tail_frame']);
-  const firstFrame = mediaUrl(explicitFirst) || images.shift();
-  let lastFrame = mediaUrl(explicitLast);
+  const firstFrame = mediaUrl(explicitFirst) || firstFrames.shift() || images.shift();
+  let lastFrame = mediaUrl(explicitLast) || lastFrames.shift();
   if (!lastFrame && config.allowSecondImageAsLastFrame && images.length > 0) {
     lastFrame = images.shift();
   }
@@ -220,14 +307,17 @@ function applyReferenceFields(payload, raw, content, config) {
 
   const referenceImages = [
     ...asStringArray(firstDefined(raw, ['reference_images', 'referenceImages', 'ref_images'])),
+    ...content.referenceImages,
     ...images
   ];
   const referenceVideos = [
     ...asStringArray(firstDefined(raw, ['reference_videos', 'referenceVideos', 'ref_videos'])),
+    ...content.referenceVideos,
     ...content.videos
   ];
   const referenceAudios = [
     ...asStringArray(firstDefined(raw, ['reference_audios', 'referenceAudios', 'ref_audios'])),
+    ...content.referenceAudios,
     ...content.audios
   ];
   const referenceAssetIds = firstDefined(raw, ['reference_asset_ids', 'referenceAssetIds']);
@@ -272,8 +362,8 @@ export function buildGmiSubmitRequest(rawBody, config) {
     };
   }
 
-  const content = extractContent(rawBody.content);
   const metadata = rawBody.metadata && typeof rawBody.metadata === 'object' ? rawBody.metadata : {};
+  const content = extractContent(mergeContentArrays(rawBody.content, metadata.content));
   const merged = { ...metadata, ...rawBody };
   const prompt = firstDefined(merged, ['prompt']) || content.texts.join('\n');
   if (!prompt || !String(prompt).trim()) {
@@ -345,6 +435,74 @@ function errorMessageFromGmi(gmi) {
   return '';
 }
 
+function firstMediaUrl(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = firstMediaUrl(item);
+      if (url) return url;
+    }
+    return '';
+  }
+  const direct = mediaUrl(value);
+  if (direct) return direct;
+  if (value && typeof value === 'object') {
+    for (const key of ['video_url', 'videoUrl', 'image_url', 'imageUrl', 'file_url', 'fileUrl']) {
+      if (!hasOwn(value, key)) continue;
+      const url = firstMediaUrl(value[key]);
+      if (url) return url;
+    }
+  }
+  return '';
+}
+
+function mediaFromSources(sources, directKeys, arrayKeys = []) {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    for (const key of directKeys) {
+      if (!hasOwn(source, key)) continue;
+      const url = firstMediaUrl(source[key]);
+      if (url) return url;
+    }
+    for (const key of arrayKeys) {
+      if (!hasOwn(source, key)) continue;
+      const url = firstMediaUrl(source[key]);
+      if (url) return url;
+    }
+  }
+  return '';
+}
+
+function gmiMedia(gmi) {
+  const sources = [gmi?.outcome, gmi?.output, gmi?.result, gmi?.response, gmi];
+  return {
+    videoUrl: mediaFromSources(
+      sources,
+      ['video_url', 'videoUrl', 'video', 'url', 'uri', 'output_url', 'outputUrl'],
+      ['videos', 'video_urls', 'videoUrls', 'outputs', 'files']
+    ),
+    lastFrameImage: mediaFromSources(
+      sources,
+      [
+        'last_frame_image',
+        'lastFrameImage',
+        'last_frame_image_url',
+        'lastFrameImageUrl',
+        'last_frame',
+        'lastFrame',
+        'thumbnail_image_url',
+        'thumbnailImageUrl',
+        'thumbnail_url',
+        'thumbnailUrl',
+        'poster_url',
+        'posterUrl',
+        'cover_url',
+        'coverUrl'
+      ],
+      ['images', 'thumbnails']
+    )
+  };
+}
+
 function payloadValue(gmi, record, key) {
   if (gmi?.payload && hasOwn(gmi.payload, key)) return gmi.payload[key];
   if (record?.payload && hasOwn(record.payload, key)) return record.payload[key];
@@ -369,7 +527,7 @@ function billingUnits(gmi, record, config) {
 
 export function toVolcTaskResponse(gmi, record = null, config = null) {
   const status = mapGmiStatusToVolc(gmi?.status);
-  const videoUrl = gmi?.outcome?.video_url || gmi?.outcome?.video || '';
+  const { videoUrl, lastFrameImage } = gmiMedia(gmi);
   const errorMessage = errorMessageFromGmi(gmi) || (status === 'failed' ? 'task failed' : '');
   const upstreamModel = gmi?.model || record?.upstreamModel || '';
   const downstreamModel = record?.downstreamModel || (config ? reverseModel(upstreamModel, config) : upstreamModel);
@@ -380,7 +538,8 @@ export function toVolcTaskResponse(gmi, record = null, config = null) {
     model: downstreamModel,
     status,
     content: {
-      video_url: videoUrl
+      video_url: videoUrl,
+      last_frame_image: lastFrameImage
     },
     seed: payloadValue(gmi, record, 'seed'),
     resolution: payloadValue(gmi, record, 'resolution'),
@@ -410,7 +569,7 @@ export function toOpenAIVideoResponse(gmi, record = null, config = null) {
   const status = mapGmiStatusToOpenAI(gmi?.status);
   const upstreamModel = gmi?.model || record?.upstreamModel || '';
   const downstreamModel = record?.downstreamModel || (config ? reverseModel(upstreamModel, config) : upstreamModel);
-  const videoUrl = gmi?.outcome?.video_url || gmi?.outcome?.video || '';
+  const { videoUrl, lastFrameImage } = gmiMedia(gmi);
   const response = cleanObject({
     id: gmi?.request_id || gmi?.id || record?.id,
     task_id: gmi?.request_id || gmi?.id || record?.id,
@@ -421,7 +580,7 @@ export function toOpenAIVideoResponse(gmi, record = null, config = null) {
     created_at: gmi?.created_at || record?.gmiCreatedAt || record?.createdAtUnix,
     completed_at: status === 'completed' || status === 'failed' ? gmi?.updated_at : undefined,
     seconds: payloadValue(gmi, record, 'duration') !== undefined ? String(payloadValue(gmi, record, 'duration')) : undefined,
-    metadata: videoUrl ? { url: videoUrl } : undefined
+    metadata: videoUrl || lastFrameImage ? { url: videoUrl, last_frame_image: lastFrameImage } : undefined
   });
   if (status === 'failed') {
     response.error = {

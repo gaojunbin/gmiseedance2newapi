@@ -150,10 +150,140 @@ test('VolcEngine task API submits to GMICloud and preserves explicit zero/false 
     assert.equal(fetched.json.model, 'doubao-seedance-2-0-260128');
     assert.equal(fetched.json.status, 'succeeded');
     assert.equal(fetched.json.content.video_url, 'https://cdn.example/video.mp4');
+    assert.equal(fetched.json.content.last_frame_image, 'https://cdn.example/thumb.jpg');
     assert.equal(fetched.json.seed, 0);
     assert.equal(fetched.json.usage.completion_tokens, 8);
     assert.equal(fetched.json.usage.total_tokens, 8);
     assert.equal(fetched.json.usage.tool_usage.web_search, 1);
+  } finally {
+    await bridge.close();
+    await upstream.close();
+  }
+});
+
+test('VolcEngine task API preserves Chatall image roles for Seedance 2.0', async () => {
+  const upstreamCalls = [];
+  const upstream = await startServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/ie/requestqueue/apikey/requests') {
+      const body = await readJson(req);
+      upstreamCalls.push(body);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        request_id: `gmi-role-${upstreamCalls.length}`,
+        model: body.model,
+        status: 'queued',
+        created_at: 500,
+        updated_at: 500
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  const { bridge } = await buildBridge(upstream.url);
+  try {
+    const referenceSubmit = await requestJson(bridge.url, '/api/v3/contents/generations/tasks', {
+      method: 'POST',
+      body: {
+        model: 'doubao-seedance-2-0-260128',
+        content: [
+          { type: 'image_url', image_url: { url: 'https://cdn.example/ref-a.jpg' }, role: 'reference_image' },
+          { type: 'image_url', image_url: { url: 'https://cdn.example/ref-b.jpg' }, role: 'reference_image' },
+          { type: 'text', text: 'Use the subject and style from the references' }
+        ],
+        duration: 6,
+        resolution: '720p',
+        ratio: '9:16'
+      }
+    });
+
+    assert.equal(referenceSubmit.status, 200);
+    assert.deepEqual(upstreamCalls[0].payload, {
+      prompt: 'Use the subject and style from the references',
+      duration: 6,
+      resolution: '720p',
+      ratio: '9:16',
+      reference_images: [
+        'https://cdn.example/ref-a.jpg',
+        'https://cdn.example/ref-b.jpg'
+      ]
+    });
+
+    const firstFrameSubmit = await requestJson(bridge.url, '/api/v3/contents/generations/tasks', {
+      method: 'POST',
+      body: {
+        model: 'doubao-seedance-2-0-260128',
+        content: [
+          { type: 'image_url', image_url: { url: 'https://cdn.example/first.jpg' }, role: 'first_frame' },
+          { type: 'text', text: 'Animate from this opening frame' }
+        ],
+        duration: 5,
+        resolution: '720p',
+        ratio: '16:9'
+      }
+    });
+
+    assert.equal(firstFrameSubmit.status, 200);
+    assert.deepEqual(upstreamCalls[1].payload, {
+      prompt: 'Animate from this opening frame',
+      duration: 5,
+      resolution: '720p',
+      ratio: '16:9',
+      first_frame: 'https://cdn.example/first.jpg'
+    });
+  } finally {
+    await bridge.close();
+    await upstream.close();
+  }
+});
+
+test('OpenAI video endpoint reads role-aware content from metadata for direct calls', async () => {
+  const upstreamCalls = [];
+  const upstream = await startServer(async (req, res) => {
+    if (req.method === 'POST' && req.url === '/api/v1/ie/requestqueue/apikey/requests') {
+      const body = await readJson(req);
+      upstreamCalls.push(body);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        request_id: 'gmi-direct-metadata',
+        model: body.model,
+        status: 'queued',
+        created_at: 600,
+        updated_at: 600
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  const { bridge } = await buildBridge(upstream.url);
+  try {
+    const submit = await requestJson(bridge.url, '/v1/video/generations', {
+      method: 'POST',
+      body: {
+        model: 'doubao-seedance-2-0-260128',
+        prompt: 'Direct Chatall-shaped request',
+        duration: 6,
+        metadata: {
+          ratio: '1:1',
+          resolution: '720p',
+          content: [
+            { type: 'image_url', image_url: { url: 'https://cdn.example/direct-ref.jpg' }, role: 'reference_image' }
+          ]
+        }
+      }
+    });
+
+    assert.equal(submit.status, 200);
+    assert.deepEqual(upstreamCalls[0].payload, {
+      prompt: 'Direct Chatall-shaped request',
+      duration: 6,
+      resolution: '720p',
+      ratio: '1:1',
+      reference_images: ['https://cdn.example/direct-ref.jpg']
+    });
   } finally {
     await bridge.close();
     await upstream.close();
